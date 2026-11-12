@@ -1529,7 +1529,6 @@ def _make_vgpu(
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
     g.add_node(vgpu)
-
     stream_sensors: List[Sensor] = [
         Sensor(
             float,
@@ -1692,6 +1691,11 @@ def _make_vgpu(
 
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
+
+    # Enforce GPU memory via CUDA; this value is small for testing purposes
+    vgpu.taskinfo.command.environment.setdefault("variables", []).append(
+        {"name": "CUPY_GPU_MEMORY_LIMIT", "value": 1024**2}
+    )
 
     vgpu.command = (
         ["schedrr"]
