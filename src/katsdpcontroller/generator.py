@@ -1528,6 +1528,7 @@ def _make_vgpu(
     vgpu.katsdpservices_config = False
     vgpu.pass_telstate = False
     g.add_node(vgpu)
+
     stream_sensors: List[Sensor] = [
         Sensor(
             float,
