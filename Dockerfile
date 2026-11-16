@@ -16,7 +16,7 @@
 
 ARG KATSDPDOCKERBASE_REGISTRY=quay.io/ska-sa
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:fix-netifaces-plus AS build
 
 # Switch to Python 3 environment
 ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
@@ -34,7 +34,7 @@ RUN pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime:fix-netifaces-plus
 LABEL maintainer="sdpdev+katsdpcontroller@ska.ac.za"
 
 # Label the image with a list of images it uses
