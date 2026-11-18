@@ -16,25 +16,32 @@
 
 ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build:uvpipjammy AS build
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
 
 # Switch to Python 3 environment
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install Python dependencies
+RUN mkdir -p /tmp/install && chown -R $USER:$USER /tmp/install
 COPY requirements.txt /tmp/install/requirements.txt
-RUN pip install -r /tmp/install/requirements.txt
+RUN uv pip compile /tmp/install/requirements.txt \
+        -c /home/kat/docker-base/base-requirements.lock \
+        -o /tmp/install/requirements.lock && \
+    uv pip install --no-deps -r /tmp/install/requirements.lock && \
+    uv pip check
 
 # Install the current package
 COPY --chown=kat:kat . /tmp/install/katsdpcontroller
 WORKDIR /tmp/install/katsdpcontroller
-RUN python ./setup.py clean
-RUN pip install --no-deps .
-RUN pip check
+# The setup.py clean step is not needed with uv, it handles 
+# old build artifacts automatically
+RUN uv pip install --no-deps . && \
+    uv pip check
 
 #######################################################################
 
-FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime:uvpipjammy
+FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-runtime
 LABEL maintainer="sdpdev+katsdpcontroller@ska.ac.za"
 
 # Label the image with a list of images it uses
@@ -55,7 +62,11 @@ RUN apt-get update && \
 USER kat
 
 COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3
-ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+# Enable Python 3 ve
+# uv is installed in ~/.local/bin in the base image
+# Activate the base image virtualenv and make uv available
+ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Network setup
 EXPOSE 5001
