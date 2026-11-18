@@ -1,6 +1,6 @@
 -r requirements.txt
 
-aioresponses
+aioresponses>=0.7.9
 async-solipsism>=0.7
 mypy
 open-mock-file
