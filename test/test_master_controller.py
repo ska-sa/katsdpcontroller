@@ -267,12 +267,11 @@ async def katcp_server_lifecycle(task: fake_singularity.Task) -> None:
 
 
 @pytest.fixture(autouse=True)
-def mock_getaddrinfo(mocker, event_loop) -> None:
+def mock_getaddrinfo(mocker) -> None:
     """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
     return_value = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.0", 0))]
     mocker.patch("socket.getaddrinfo", return_value=return_value)
-    mocker.patch.object(event_loop, "getaddrinfo", return_value=return_value)
-
+    mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", return_value=return_value)
 
 class TestSingularityProductManager:
     class Fixture:
@@ -352,9 +351,9 @@ class TestSingularityProductManager:
         await server.stop()
 
     @pytest.fixture(autouse=True)
-    def client_mock(self, mocker, event_loop) -> mock.MagicMock:
+    def client_mock(self, mocker) -> mock.MagicMock:
         client_mock = mocker.patch("aiokatcp.Client", autospec=True)
-        client_mock.return_value.loop = event_loop
+        client_mock.return_value.loop = asyncio.get_event_loop()
         client_mock.return_value.logger = mock.MagicMock()
         return client_mock
 
