@@ -72,7 +72,7 @@ pytest
     #   pytest-cov
     #   pytest-mock
     #   pytest-timeout
-pytest-asyncio >=0.26,<0.27  
+pytest-asyncio == 1.5.0  
     # via -r test-requirements.in
 pytest-cov
     # via -r test-requirements.in
