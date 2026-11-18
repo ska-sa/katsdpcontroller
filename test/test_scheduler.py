@@ -53,7 +53,7 @@ from .utils import (
 
 
 @pytest.fixture(autouse=True)
-def mock_getaddrinfo(mocker) -> None:
+async def mock_getaddrinfo(mocker) -> None:
     """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
     return_value = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.0", 0))]
     mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", return_value=return_value) 
