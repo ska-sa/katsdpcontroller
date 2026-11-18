@@ -1,4 +1,4 @@
--c requirements.txt
+-r requirements.txt
 
 aioresponses
 async-solipsism>=0.7
