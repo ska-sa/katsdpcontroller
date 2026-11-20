@@ -6,10 +6,8 @@ aiohappyeyeballs
 aiohttp
     # via
     #   -c requirements.txt
-    #   aioresponses
-aioresponses >= 0.7.9 
-    # Older aioresponses versions are incompatible with newer aiohttp which
-    #requires stream_writer in ClientResponse.__init__. 
+    #   aioresponses-ng
+aioresponses-ng>=0.8.2
     # via -r test-requirements.in
 aiosignal
     # via

@@ -32,7 +32,6 @@ from typing import Optional, Tuple
 
 import addict
 import aiokatcp
-import aiomonitor
 import jsonschema
 import katsdpservices
 import pymesos
@@ -148,9 +147,9 @@ def parse_args() -> Tuple[argparse.ArgumentParser, argparse.Namespace]:
     add_shared_options(parser)
     katsdpservices.add_aiomonitor_arguments(parser)
     parser.set_defaults(
-        aiomonitor_port=os.environ.get("PORT2", aiomonitor.MONITOR_PORT),
-        aioconsole_port=os.environ.get("PORT3", aiomonitor.CONSOLE_PORT),
-        aiomonitor_webui_port=os.environ.get("PORT5", aiomonitor.MONITOR_WEBUI_PORT),
+        aiomonitor_port=os.environ.get("PORT2", parser.get_default("aiomonitor_port")),
+        aioconsole_port=os.environ.get("PORT3", parser.get_default("aioconsole_port")),
+        aiomonitor_webui_port=os.environ.get("PORT5", parser.get_default("aiomonitor_webui_port")),
     )
     args = parser.parse_args()
 

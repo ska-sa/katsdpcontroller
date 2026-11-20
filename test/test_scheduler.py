@@ -56,7 +56,8 @@ from .utils import (
 async def mock_getaddrinfo(mocker) -> None:
     """async-solipsism doesn't support getaddrinfo, so provide a dummy version."""
     return_value = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.0", 0))]
-    mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", return_value=return_value) 
+    mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", return_value=return_value)
+
 
 async def getaddrinfo_never(*args, **kwargs):
     """Never return.
