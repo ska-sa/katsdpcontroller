@@ -149,8 +149,9 @@ def _redact_keys(taskinfo: addict.Dict, s3_config: dict) -> addict.Dict:
         Copy of `taskinfo` with secrets redacted
     """
     taskinfo = taskinfo.copy()
-    if taskinfo.command.arguments:
-        taskinfo.command = taskinfo.command.copy()
+    command = taskinfo.get("command")
+    if command and command.get("arguments"):
+        taskinfo.command = command.copy()
         taskinfo.command.arguments = [
             _redact_arg(arg, s3_config) for arg in taskinfo.command.arguments
         ]
@@ -177,6 +178,7 @@ def _prometheus_factory(
         return None
     type_ = match.group("type").lower()
     args_ = match.group("args")
+    class_: Callable[..., Union[Counter, Gauge, Histogram]]
     if type_ == "counter":
         class_ = Counter
         if args_ is not None:
@@ -531,7 +533,7 @@ class SubarrayProduct:
         # Set gauges for expected data rates
         for gauge in STATIC_GAUGES:
             value = 0.0
-            gauge_name = gauge.collect()[0].name
+            gauge_name = next(iter(gauge.collect())).name
             for node in self.logical_graph:
                 if isinstance(node, tasks.ProductLogicalTask):
                     value += node.static_gauges.get(gauge_name, 0.0)

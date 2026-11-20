@@ -417,20 +417,20 @@ class TestPrometheusWatcher:
     def test_counter(self) -> None:
         sensor = self.sensors["int-sensor"]
         sensor.value = 4
-        self._check_prom("test_int_sensor", 4)
+        self._check_prom("test_int_sensor", 4, suffix="_total")
         # Increase the value
         sensor.value = 10
-        self._check_prom("test_int_sensor", 10)
+        self._check_prom("test_int_sensor", 10, suffix="_total")
         # Reset then increase the value. The counter must record the cumulative total
         sensor.value = 0
         sensor.set_value(6, status=Sensor.Status.ERROR)
-        self._check_prom("test_int_sensor", 16, Sensor.Status.ERROR)
+        self._check_prom("test_int_sensor", 16, Sensor.Status.ERROR, suffix="_total")
         # Set to an invalid status. The counter value must not be affected.
         sensor.set_value(9, status=Sensor.Status.FAILURE)
-        self._check_prom("test_int_sensor", 16, Sensor.Status.FAILURE)
+        self._check_prom("test_int_sensor", 16, Sensor.Status.FAILURE, suffix="_total")
         # Set back to a valid status
         sensor.value = 8
-        self._check_prom("test_int_sensor", 18)
+        self._check_prom("test_int_sensor", 18, suffix="_total")
 
     def test_add_sensor(self) -> None:
         # A non-Prometheus sensor, just to check that this doesn't break anything
@@ -441,7 +441,7 @@ class TestPrometheusWatcher:
 
     def test_remove_sensor(self) -> None:
         del self.sensors["int-sensor"]
-        self._check_prom("test_int_sensor", None, status=None)
+        self._check_prom("test_int_sensor", None, status=None, suffix="_total")
 
     def test_extra_labels(self) -> None:
         self.sensors["bool-sensor"].value = True
@@ -449,4 +449,4 @@ class TestPrometheusWatcher:
 
     def test_close(self) -> None:
         self.watcher.close()
-        self._check_prom("test_int_sensor", None, status=None)
+        self._check_prom("test_int_sensor", None, status=None, suffix="_total")

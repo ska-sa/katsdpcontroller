@@ -34,14 +34,10 @@ from typing import (
 )
 
 import aiokatcp
-import prometheus_client  # noqa: F401
-from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
+from prometheus_client import REGISTRY, CollectorRegistry, Counter, Gauge, Histogram
 
 logger = logging.getLogger(__name__)
 _Metric = Union[Gauge, Counter, Histogram]
-# Use a string so that code won't completely break if Prometheus internals change.
-# The Union is required because mypy doesn't like pure strings being used indirectly.
-_LabelWrapper = Union["prometheus_client.core._LabelWrapper"]
 _Factory = Callable[[aiokatcp.Sensor], Optional["PrometheusInfo"]]
 
 
@@ -233,11 +229,11 @@ class PrometheusInfo:
 
     def __init__(
         self,
-        class_: Callable[..., _LabelWrapper],
+        class_: Callable[..., _Metric],
         name: str,
         description: str,
         labels: Mapping[str, str],
-        registry: CollectorRegistry = prometheus_client.REGISTRY,
+        registry: CollectorRegistry = REGISTRY,
     ) -> None:
         self.class_ = class_
         self.name = name
@@ -252,8 +248,8 @@ class PrometheusObserver:
     def __init__(
         self,
         sensor: aiokatcp.Sensor,
-        value_metric: _LabelWrapper,
-        status_metric: _LabelWrapper,
+        value_metric: _Metric,
+        status_metric: Gauge,
         label_values: Iterable[str],
     ) -> None:
         self._sensor = sensor
@@ -262,7 +258,7 @@ class PrometheusObserver:
         self._value_metric_root = value_metric
         self._status_metric_root = status_metric
         self._value_metric: _Metric = value_metric.labels(*label_values)
-        self._status_metric: _Metric = status_metric.labels(*label_values)
+        self._status_metric = status_metric.labels(*label_values)
         self._label_values = tuple(label_values)
         sensor.attach(self)
 
@@ -271,14 +267,10 @@ class PrometheusObserver:
         value = _reading_to_float(reading) if valid else 0.0
         timestamp = reading.timestamp
         self._status_metric.set(reading.status.value)
-        # Detecting the type of the metric is tricky, because Counter and
-        # Gauge aren't actually classes (they're functions). So we have to
-        # use introspection.
-        metric_type = type(self._value_metric).__name__
-        if metric_type == "Gauge":
+        if isinstance(self._value_metric, Gauge):
             if valid:
                 self._value_metric.set(value)
-        elif metric_type == "Counter":
+        elif isinstance(self._value_metric, Counter):
             # If the sensor is invalid, then the counter isn't increasing
             if valid:
                 if value < self._old_value:
@@ -294,11 +286,13 @@ class PrometheusObserver:
                     # sees a cumulative count.
                 else:
                     self._value_metric.inc(value - self._old_value)
-        elif metric_type == "Histogram":
+        elif isinstance(self._value_metric, Histogram):
             if valid and timestamp != self._old_timestamp:
                 self._value_metric.observe(value)
         else:
-            raise TypeError(f"Expected a Counter, Gauge or Histogram, not {metric_type}")
+            raise TypeError(
+                f"Expected a Counter, Gauge or Histogram, not {type(self._value_metric).__name__}"
+            )
         if valid:
             self._old_value = value
         self._old_timestamp = timestamp
@@ -335,14 +329,14 @@ class PrometheusWatcher:
 
     # Caches metrics by name. Each entry stores the primary metric
     # and the status metric.
-    _metrics: Dict[str, Tuple[_LabelWrapper, _LabelWrapper]] = {}
+    _metrics: Dict[str, Tuple[_Metric, Gauge]] = {}
 
     def __init__(
         self,
         sensors: aiokatcp.SensorSet,
         labels: Optional[Mapping[str, str]] = None,
         factory: Optional[_Factory] = None,
-        metrics: Optional[Dict[str, Tuple[_LabelWrapper, _LabelWrapper]]] = None,
+        metrics: Optional[Dict[str, Tuple[_Metric, Gauge]]] = None,
     ) -> None:
         self.sensors = sensors
         # Indexed by sensor name; None if no observer is needed.

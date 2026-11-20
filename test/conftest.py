@@ -26,7 +26,12 @@ def solipsism(monkeypatch: pytest.MonkeyPatch) -> async_solipsism.EventLoopPolic
 
     Wrap this in an `event_loop_policy` fixture for a test.
     """
-    monkeypatch.setattr(
-        "aiohappyeyeballs.start_connection", async_solipsism.aiohappyeyeballs_start_connection
-    )
+    # aiohttp passes socket_factory even when it is None. The Python 3.10
+    # release of async-solipsism does not accept this keyword.
+    async def start_connection(addr_infos, *, socket_factory=None, **kwargs):
+        if socket_factory is not None:
+            kwargs["socket_factory"] = socket_factory
+        return await async_solipsism.aiohappyeyeballs_start_connection(addr_infos, **kwargs)
+
+    monkeypatch.setattr("aiohappyeyeballs.start_connection", start_connection)
     return async_solipsism.EventLoopPolicy()

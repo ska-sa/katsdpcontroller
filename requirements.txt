@@ -59,7 +59,7 @@ click
     #   flask
 cloudpickle
     # via dask
-dash
+dash>=2.15,<3
     # via katsdpcontroller (setup.cfg)
 dash-core-components
     # via
@@ -215,7 +215,7 @@ plotly
     # via dash
 prometheus-async
     # via katsdpcontroller (setup.cfg)
-prometheus-client
+prometheus-client>=0.5
     # via
     #   katsdpcontroller (setup.cfg)
     #   prometheus-async

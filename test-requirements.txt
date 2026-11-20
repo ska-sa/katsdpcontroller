@@ -6,8 +6,8 @@ aiohappyeyeballs
 aiohttp
     # via
     #   -c requirements.txt
-    #   aioresponses
-aioresponses
+    #   aioresponses-ng
+aioresponses-ng>=0.8.2
     # via -r test-requirements.in
 aiosignal
     # via

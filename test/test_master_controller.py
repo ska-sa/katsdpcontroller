@@ -273,6 +273,7 @@ async def mock_getaddrinfo(mocker) -> None:
     mocker.patch("socket.getaddrinfo", return_value=return_value)
     mocker.patch.object(asyncio.get_event_loop(), "getaddrinfo", return_value=return_value)
 
+
 class TestSingularityProductManager:
     class Fixture:
         """Handles starting and stopping a :class:`SingularityProductManager`."""

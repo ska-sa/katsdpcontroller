@@ -37,10 +37,10 @@ import shutil
 import signal
 import tempfile
 import weakref
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp_jinja2
-import importlib_resources
 import jinja2
 import yarl
 from aiohttp import WSMsgType, web
@@ -378,7 +378,7 @@ def make_app(
             web.get("/rotate", _rotate_handler),
             web.post("/gui/{product}/{path:.*}/_dash-update-component", _block_dashboard),
             web.route("*", "/gui/{product}/{service}/{gui}{path:.*}", _missing_gui_handler),
-            web.static("/static", importlib_resources.files("katsdpcontroller") / "static"),
+            web.static("/static", Path(__file__).with_name("static")),
         ]
     )
     aiohttp_jinja2.setup(
