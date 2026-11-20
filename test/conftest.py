@@ -17,8 +17,28 @@
 import async_solipsism
 import pytest
 
+from unittest.mock import MagicMock
+from aioresponses import core as aioresponses_core
+
 pytest.register_assert_rewrite("test.utils")
 
+# Workaround for aioresponses incompatibility with aiohttp>=3.14
+# aiohttp 3.14 made stream_writer a required kwarg of ClientResponse
+# but aioresponses does not pass it. Remove once aioresponses ships a fix.
+# Patching ClientResponse.__init__ directly is more reliable since it intercepts at the source.
+try:
+    from aiohttp import ClientResponse
+    from unittest.mock import MagicMock
+    _orig_init = ClientResponse.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        if 'stream_writer' not in kwargs:
+            kwargs['stream_writer'] = MagicMock()
+        _orig_init(self, *args, **kwargs)
+
+    ClientResponse.__init__ = _patched_init
+except Exception:
+    pass
 
 @pytest.fixture
 def solipsism(monkeypatch: pytest.MonkeyPatch) -> async_solipsism.EventLoopPolicy:
