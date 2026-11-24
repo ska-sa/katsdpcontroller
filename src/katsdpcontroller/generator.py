@@ -2218,7 +2218,7 @@ def _make_ingest(
         ingest.cores = [None] * ingest.cpus
         # Scale factor of 32 may be overly conservative: actual usage may be
         # only half this. This also leaves headroom for buffering L0 output.
-        ingest.mem = 32 * _mb(src.size) / n_ingest + 4096
+        ingest.mem = 2 * 32 * _mb(src.size) / n_ingest + 4096
         ingest.transitions = CAPTURE_TRANSITIONS
         ingest.interfaces = [
             scheduler.InterfaceRequest(
