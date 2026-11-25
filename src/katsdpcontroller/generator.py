@@ -1518,7 +1518,6 @@ def _make_vgpu(
     n_samples_per_frame = defaults.VGPU_SAMPLES_PER_FRAME
     threshold = [defaults.VGPU_THRESHOLD]
     acv = stream.antenna_channelised_voltage
-    sync_time = acv.sources(0)[0].sync_time
     tacv = stream.tied_array_channelised_voltage
     ibv = not configuration.options.develop.disable_ibverbs
     vgpu = ProductLogicalTask(f"v.{stream.name}", streams=[stream])
@@ -1531,22 +1530,6 @@ def _make_vgpu(
     g.add_node(vgpu)
 
     stream_sensors: List[Sensor] = [
-        Sensor(
-            float,
-            f"{stream.name}.scale-factor-timestamp",
-            "Factor by which to divide instrument timestamps to convert to seconds",
-            "Hz",
-            default=acv.adc_sample_rate,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
-        Sensor(
-            float,
-            f"{stream.name}.sync-time",
-            "The time at which the digitisers were synchronised. Seconds since the Unix Epoch.",
-            "s",
-            default=sync_time,
-            initial_status=Sensor.Status.NOMINAL,
-        ),
         Sensor(
             float,
             f"{stream.name}.bandwidth",
@@ -1704,7 +1687,6 @@ def _make_vgpu(
         + [
             "vgpu",
             f"--adc-sample-rate={acv.adc_sample_rate}",
-            f"--sync-time={sync_time}",
             f"--recv-channels={acv.n_chans}",
             f"--recv-channels-per-substream={tacv[0].n_chans_per_substream}",
             f"--recv-jones-per-batch={tacv[0].n_jones_per_batch}",
