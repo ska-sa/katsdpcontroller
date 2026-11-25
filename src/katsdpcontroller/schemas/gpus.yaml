@@ -19,8 +19,6 @@ items:
         minimum: 0
       minLength: 2
       maxLength: 2
-    device_attributes:
-      type: object
     numa_node:
       type: integer
       minimum: 0
