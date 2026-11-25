@@ -1693,6 +1693,11 @@ def _make_vgpu(
     # Estimate required GPU memory
     vgpu.gpus[0].mem = round(33.4 * bandwidth_mhz) + 2766
 
+    # Enforce GPU memory limit in CUDA
+    vgpu.taskinfo.command.environment.setdefault("variables", []).append(
+        {"name": "CUPY_GPU_MEMORY_LIMIT", "value": vgpu.gpus[0].mem * 1024**2}
+    )
+
     vgpu.command = (
         ["schedrr"]
         + taskset
