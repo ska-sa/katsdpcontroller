@@ -33,3 +33,4 @@ scipy
 www-authenticate
 yarl
 pymesos
+aiohttp-retry
