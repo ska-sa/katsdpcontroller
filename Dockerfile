@@ -18,17 +18,11 @@ ARG KATSDPDOCKERBASE_REGISTRY=harbor.sdp.kat.ac.za/dpp
 
 FROM $KATSDPDOCKERBASE_REGISTRY/docker-base-build AS build
 
-# Switch to Python 3 environment
-ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
-#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Install Python dependencies
 RUN mkdir -p /tmp/install && chown -R $USER:$USER /tmp/install
 COPY requirements.txt /tmp/install/requirements.txt
-RUN uv pip compile /tmp/install/requirements.txt \
-        -c /home/kat/docker-base/base-requirements.lock \
-        -o /tmp/install/requirements.lock && \
-    uv pip install --no-deps -r /tmp/install/requirements.lock && \
+RUN  uv pip install --no-deps -r /tmp/install/requirements.txt && \
     uv pip check
 
 # Install the current package
@@ -62,11 +56,8 @@ RUN apt-get update && \
 USER kat
 
 COPY --from=build --chown=kat:kat /home/kat/ve3 /home/kat/ve3
-# Enable Python 3 ve
-# uv is installed in ~/.local/bin in the base image
-# Activate the base image virtualenv and make uv available
-ENV PATH="/home/kat/.local/bin:$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
-#ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
+# Enable Python 3 ve3
+ENV PATH="$PATH_PYTHON3" VIRTUAL_ENV="$VIRTUAL_ENV_PYTHON3"
 
 # Network setup
 EXPOSE 5001

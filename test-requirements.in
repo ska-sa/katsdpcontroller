@@ -1,13 +1,13 @@
--r requirements.txt
 
-aioresponses-ng>=0.8.2
-async-solipsism>=0.7
+
+aioresponses-ng
+async-solipsism
 mypy
 open-mock-file
 psutil
 pyfakefs
 pytest
-pytest-asyncio>=0.23
+pytest-asyncio
 pytest-cov
 pytest-mock
 pytest-timeout
