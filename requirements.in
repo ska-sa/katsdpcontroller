@@ -16,9 +16,9 @@ jinja2
 jsonschema
 katdal
 katportalclient
-katsdpmodels
-katsdpservices
-katsdptelstate
+katsdpmodels[aiohttp]
+katsdpservices[argparse,aiomonitor]
+katsdptelstate[aio]
 kazoo
 netifaces
 networkx
